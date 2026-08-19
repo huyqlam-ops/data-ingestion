@@ -16,11 +16,9 @@ import java.time.OffsetDateTime;
 public class ReportDocument {
 
     @Id
-    private String id;
-
-    @PartitionKey
     private String key;
 
+    @PartitionKey
     private String data;
 
     private OffsetDateTime datetimeAdded;

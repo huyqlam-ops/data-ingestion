@@ -1,8 +1,10 @@
 package com.cloudnative.dataingest.data;
 
+import com.azure.messaging.eventhubs.EventProcessorClient;
 import com.azure.spring.cloud.service.eventhubs.consumer.EventHubsErrorHandler;
 import com.azure.spring.cloud.service.eventhubs.consumer.EventHubsRecordMessageListener;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,25 +12,26 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class EventHubProcessorClientConfiguration {
 
-    // Bean xử lý khi nhận được tin nhắn mới từ Event Hub
     @Bean
-    public EventHubsRecordMessageListener processEvent(ReportService reportService) {
-        return eventContext -> {
-            log.info("Đã nhận event từ Partition {}: {}",
-                    eventContext.getPartitionContext().getPartitionId(),
-                    eventContext.getEventData().getBodyAsString());
-
-            reportService.saveReportFromEvent(eventContext.getEventData().getBodyAsString());
-            // Đánh dấu đã xử lý (checkpoint)
+    EventHubsRecordMessageListener processEvent(ReportService reportService) {
+        return eventContext-> {
+            String body = eventContext.getEventData().getBodyAsString();
+            log.info("Received event from partition {} with body: {}", eventContext.getPartitionContext().getPartitionId(), body);
+            reportService.saveReportFromEvent(body);
             eventContext.updateCheckpoint();
         };
     }
 
-    // Bean xử lý khi gặp lỗi trong quá trình lắng nghe
     @Bean
-    public EventHubsErrorHandler processError() {
-        return errorContext -> log.error("Lỗi tại Partition {}: {}",
+    EventHubsErrorHandler processError() {
+        return errorContext->log.info("Error occurred in partition processor for partition {},{}",
                 errorContext.getPartitionContext().getPartitionId(),
-                errorContext.getThrowable().getMessage());
+                errorContext.getThrowable());
     }
+
+    @Bean
+    CommandLineRunner startEventProcessor(EventProcessorClient eventProcessorClient) {
+        return args -> eventProcessorClient.start();
+    }
+
 }
