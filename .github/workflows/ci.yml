@@ -27,7 +27,7 @@ jobs:
           cache: maven
 
       - name: Build and run tests
-        run: mvn -B clean verify -Dspring.profiles.active=test
+        run: mvn -B clean verify
 
       - name: Publish test results
         if: always()
