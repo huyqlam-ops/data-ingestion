@@ -1,13 +1,11 @@
-name: CI - Build & Test
+name: CI
 
 # Chạy cho mọi push vào feature branch (mọi branch trừ main)
 on:
   push:
-    branches-ignore:
-      - main
+    branches: [ "main" ]
   pull_request:
-    branches:
-      - main
+    branches: [ "main" ]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -29,7 +27,7 @@ jobs:
           cache: maven
 
       - name: Build and run tests
-        run: mvn -B clean verify
+        run: mvn -B clean verify -Dspring.profiles.active=test
 
       - name: Publish test results
         if: always()

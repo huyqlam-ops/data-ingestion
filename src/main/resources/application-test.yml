@@ -1,0 +1,4 @@
+spring:
+  cloud:
+    azure:
+      enabled: false
