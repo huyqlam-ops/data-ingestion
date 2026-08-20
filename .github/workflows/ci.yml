@@ -1,25 +1,40 @@
-name: CI
+name: CI - Build & Test
 
+# Chạy cho mọi push vào feature branch (mọi branch trừ main)
 on:
   push:
+    branches-ignore:
+      - main
+  pull_request:
     branches:
-      - "**"
-      - "!main"
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up JDK 25 (Temurin)
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "25"
+          java-version: '25'
+          distribution: 'temurin'
           cache: maven
 
-      - name: Build and test
-        run: ./mvnw clean verify -Dspring.profiles.active=test
+      - name: Build and run tests
+        run: mvn -B clean verify
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
