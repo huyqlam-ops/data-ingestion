@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+    environment:
+      name: dev
+      url: ${{ steps.deploy.outputs.fqdn }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
