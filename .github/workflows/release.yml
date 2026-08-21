@@ -1,9 +1,11 @@
 name: Release - Build, Test, Tag & Push to ACR
 
+# Chỉ chạy SAU KHI workflow "CI" chạy xong trên nhánh main (không tự trigger bằng push nữa)
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI"]      # phải khớp CHÍNH XÁC với `name:` khai trong ci.yml
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -16,16 +18,25 @@ env:
 jobs:
   build-test-release:
     name: Build, Test & Release
+    # Chỉ chạy tiếp nếu CI vừa rồi PASS - nếu CI fail thì dừng luôn, không release
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+
     environment:
       name: dev
-      url: ${{ steps.deploy.outputs.fqdn }}
+      # đã bỏ "url: ${{ steps.deploy.outputs.fqdn }}" vì job này không có step "deploy" nào cả -
+      # đó là copy nhầm từ deploy.yml, giữ lại sẽ luôn rỗng/lỗi
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          # QUAN TRỌNG: với workflow_run, mặc định checkout sẽ lấy nhánh default,
+          # không phải đúng commit vừa được CI test. Phải chỉ rõ ref = head_sha
+          # của run đã trigger workflow này để đảm bảo build/release đúng commit đó.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Set up JDK 25 (Temurin)
@@ -35,9 +46,8 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build and run tests
-        run: mvn -B clean verify
-
+      # Chỉ dùng Maven để ĐỌC version trong pom.xml (evaluate property, không compile/test gì cả)
+      # -> nhanh hơn nhiều so với "mvn clean verify" + "mvn package" trước đây
       - name: Determine release version
         id: version
         run: |
@@ -46,14 +56,12 @@ jobs:
           echo "Release tag: $TAG"
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Package jar
-        run: mvn -B package -DskipTests
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}   # tag đúng commit đã test, không phải HEAD hiện tại của main
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
