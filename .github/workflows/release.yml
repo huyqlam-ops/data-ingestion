@@ -1,0 +1,93 @@
+name: Release - Build, Test, Tag & Push to ACR
+
+# Chỉ chạy SAU KHI workflow "CI" chạy xong trên nhánh main (không tự trigger bằng push nữa)
+on:
+  workflow_run:
+    workflows: ["CI"]      # phải khớp CHÍNH XÁC với `name:` khai trong ci.yml
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  IMAGE_NAME: dataingest
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+
+jobs:
+  build-test-release:
+    name: Build, Test & Release
+    # Chỉ chạy tiếp nếu CI vừa rồi PASS - nếu CI fail thì dừng luôn, không release
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    environment:
+      name: dev
+      # đã bỏ "url: ${{ steps.deploy.outputs.fqdn }}" vì job này không có step "deploy" nào cả -
+      # đó là copy nhầm từ deploy.yml, giữ lại sẽ luôn rỗng/lỗi
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # QUAN TRỌNG: với workflow_run, mặc định checkout sẽ lấy nhánh default,
+          # không phải đúng commit vừa được CI test. Phải chỉ rõ ref = head_sha
+          # của run đã trigger workflow này để đảm bảo build/release đúng commit đó.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      # Chỉ dùng Maven để ĐỌC version trong pom.xml (evaluate property, không compile/test gì cả)
+      # -> nhanh hơn nhiều so với "mvn clean verify" + "mvn package" trước đây
+      - name: Determine release version
+        id: version
+        run: |
+          BASE_VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec | sed 's/-SNAPSHOT//')
+          TAG="v${BASE_VERSION}.${GITHUB_RUN_NUMBER}"
+          echo "Release tag: $TAG"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}   # tag đúng commit đã test, không phải HEAD hiện tại của main
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- Azure / ACR ---
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image to ACR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
