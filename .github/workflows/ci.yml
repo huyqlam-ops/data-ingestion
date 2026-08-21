@@ -2,8 +2,6 @@ name: CI
 
 # Chạy cho mọi push vào feature branch (mọi branch trừ main)
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 

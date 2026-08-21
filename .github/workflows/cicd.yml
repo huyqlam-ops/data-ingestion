@@ -40,16 +40,13 @@ jobs:
           path: target/surefire-reports/
           retention-days: 7
 
-  # ---------- 2. RELEASE (tag + push image lên ACR) ----------
-  release:
-    name: Release & Push to ACR
-    needs: build-test   # chỉ chạy nếu build-test PASS
+  # ---------- 2. CREATE RELEASE (chỉ tạo tag + GitHub Release, KHÔNG build docker) ----------
+  create-release:
+    name: Create Release
+    needs: build-test
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-
-    environment:
-      name: dev
 
     steps:
       - name: Checkout code
@@ -64,12 +61,12 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # Chỉ dùng Maven để đọc version trong pom.xml, không build/test lại (đã làm ở job build-test)
       - name: Determine release version
         id: version
         run: |
           BASE_VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec | sed 's/-SNAPSHOT//')
-          TAG="v${BASE_VERSION}.${GITHUB_RUN_NUMBER}"
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TAG="v${BASE_VERSION}-${SHORT_SHA}"
           echo "Release tag: $TAG"
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
@@ -81,6 +78,19 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------- 3. PUSH IMAGE lên ACR (tách riêng - re-run job này không tạo lại release) ----------
+  push-image:
+    name: Build & Push Image to ACR
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    environment:
+      name: dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -102,15 +112,17 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }}
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------- 3. DEPLOY lên Azure Container Apps ----------
+  # ---------- 4. DEPLOY lên Azure Container Apps ----------
   deploy:
     name: Deploy to Azure Container Apps
-    needs: release   # chỉ chạy nếu release + push ACR thành công
+    needs:
+      - create-release   # cần để lấy output version
+      - push-image        # phải đợi image được push xong
     runs-on: ubuntu-latest
 
     environment:
@@ -132,8 +144,8 @@ jobs:
           acrName: ${{ secrets.ACR_NAME }}
           containerAppName: ${{ secrets.CONTAINER_APP_NAME }}
           resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.release.outputs.version }}
+          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }}
           targetPort: 8080
 
       - name: Print deployed version
-        run: echo "Đã deploy image ${{ env.IMAGE_NAME }}:${{ needs.release.outputs.version }} lên Azure Container Apps"
+        run: echo "Đã deploy image ${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }} lên Azure Container Apps"
