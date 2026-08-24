@@ -12,6 +12,7 @@ permissions:
 env:
   IMAGE_NAME: dataingest
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  CONTAINER_NAME: ingest
 
 jobs:
   # ---------- 1. BUILD & TEST ----------
@@ -143,6 +144,7 @@ jobs:
         with:
           acrName: ${{ secrets.ACR_NAME }}
           containerAppName: ${{ secrets.CONTAINER_APP_NAME }}
+          containerName: ${{ env.CONTAINER_NAME }}
           resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
           imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }}
           targetPort: 8080
