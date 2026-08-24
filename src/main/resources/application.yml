@@ -32,6 +32,9 @@ management:
   endpoint:
     prometheus:
       access: unrestricted
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 logging:
   file:
