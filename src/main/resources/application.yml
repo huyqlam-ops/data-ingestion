@@ -23,3 +23,16 @@ spring:
       cosmos:
         endpoint: ${AZURE_COSMOS_ENDPOINT:test-endpoint}
         database: ${AZURE_COSMOS_DATABASE:test-db}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus, health
+  endpoint:
+    prometheus:
+      access: unrestricted
+
+logging:
+  file:
+    name: ${LOG_FILE_PATH:./logs/dataingest.log}
