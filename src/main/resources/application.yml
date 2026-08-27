@@ -15,6 +15,7 @@ spring:
         event-hub-name: ${AZURE_EVENTHUBS_NAME:test-eventhub}
         processor:
           consumer-group: $Default
+          track-last-enqueued-event-properties: true
           checkpoint-store:
             container-name: ${STORAGE_CONTAINER_CHECKPOINT:checkpoint}
             account-name: ${AZURE_STORAGE_ACCOUNT:test}
