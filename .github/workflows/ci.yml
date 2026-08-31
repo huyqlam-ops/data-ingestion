@@ -1,6 +1,5 @@
 name: CI
 
-# Chạy cho mọi push vào feature branch (mọi branch trừ main)
 on:
   pull_request:
     branches: [ "main" ]
@@ -10,27 +9,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 25 (Temurin)
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Build and run tests
-        run: mvn -B clean verify
-
-      - name: Publish test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: surefire-reports
-          path: target/surefire-reports/
-          retention-days: 7
+  call-ci-workflow:
+    uses: huyqlam-ops/shared-workflow/.github/workflows/ci.yml@main
+    with:
+      java_version: '25'
+      retention_days: 7

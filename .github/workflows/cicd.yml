@@ -1,4 +1,4 @@
-name: CI/CD - Build, Test, Release & Deploy
+name: CI/CD Pipeline
 
 on:
   push:
@@ -6,152 +6,15 @@ on:
       - main
 
 permissions:
-  contents: write   # cần để tạo Git tag + GitHub Release
-  id-token: write    # cho Azure OIDC login
-
-env:
-  IMAGE_NAME: dataingest
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  CONTAINER_NAME: ingest
+  contents: write
+  id-token: write
 
 jobs:
-  # ---------- 1. BUILD & TEST ----------
-  build-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 25 (Temurin)
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Build and run tests
-        run: mvn -B clean verify
-
-      - name: Publish test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: surefire-reports
-          path: target/surefire-reports/
-          retention-days: 7
-
-  # ---------- 2. CREATE RELEASE (chỉ tạo tag + GitHub Release, KHÔNG build docker) ----------
-  create-release:
-    name: Create Release
-    needs: build-test
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up JDK 25 (Temurin)
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Determine release version
-        id: version
-        run: |
-          BASE_VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec | sed 's/-SNAPSHOT//')
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          TAG="v${BASE_VERSION}-${SHORT_SHA}"
-          echo "Release tag: $TAG"
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.version.outputs.version }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ---------- 3. PUSH IMAGE lên ACR (tách riêng - re-run job này không tạo lại release) ----------
-  push-image:
-    name: Build & Push Image to ACR
-    needs: create-release
-    runs-on: ubuntu-latest
-
-    environment:
-      name: dev
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Login to Azure Container Registry
-        run: az acr login --name ${{ secrets.ACR_NAME }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image to ACR
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }}
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ---------- 4. DEPLOY lên Azure Container Apps ----------
-  deploy:
-    name: Deploy to Azure Container Apps
-    needs:
-      - create-release   # cần để lấy output version
-      - push-image        # phải đợi image được push xong
-    runs-on: ubuntu-latest
-
-    environment:
-      name: dev
-      url: ${{ steps.deploy.outputs.fqdn }}
-
-    steps:
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy new revision to Azure Container Apps
-        id: deploy
-        run: |
-          az containerapp update \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --container-name ${{ env.CONTAINER_NAME }} \
-            --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }}
-          
-          FQDN=$(az containerapp show \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --query properties.configuration.ingress.fqdn -o tsv)
-          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
-
-      - name: Print deployed version
-        run: echo "Đã deploy image ${{ env.IMAGE_NAME }}:${{ needs.create-release.outputs.version }} lên Azure Container Apps"
+  call-deploy-workflow:
+    uses: huyqlam-ops/shared-workflow/.github/workflows/cicd.yml@main
+    with:
+      image_name: 'dataingest'
+      container_name: 'ingest'
+      java_version: '25'
+      environment_name: 'dev'
+    secrets: inherit
